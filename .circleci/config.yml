@@ -1,103 +1,52 @@
-version: 2.0
-
+version: 2.1
 jobs:
-  checkout_code:
-    docker:
-      - image: circleci/ruby:2.4-node-jessie
-      - image: circleci/postgres:9.4.12-alpine
-    working_directory: ~/circleci-demo-workflows
+  build-and-test:
+    macos:
+      xcode: 11.3.0
+
     steps:
       - checkout
-      - save_cache:
-          key: v1-repo-{{ .Environment.CIRCLE_SHA1 }}
-          paths:
-            - ~/circleci-demo-workflows
-
-  bundle_dependencies:
-    docker:
-      - image: circleci/ruby:2.4-node-jessie
-      - image: circleci/postgres:9.4.12-alpine
-    working_directory: ~/circleci-demo-workflows
-    steps:
-      - restore_cache:
-          key: v1-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          key: v1-bundle-{{ checksum "Gemfile.lock" }}
-      - run: bundle install --path vendor/bundle
-      - save_cache:
-          key: v1-bundle-{{ checksum "Gemfile.lock" }}
-          paths:
-            - ~/circleci-demo-workflows/vendor/bundle
-
-  rake_test:
-    docker:
-      - image: circleci/ruby:2.4-node-jessie
-      - image: circleci/postgres:9.4.12-alpine
-    working_directory: ~/circleci-demo-workflows
-    steps:
-      - restore_cache:
-          key: v1-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          key: v1-bundle-{{ checksum "Gemfile.lock" }}
-      - run: bundle --path vendor/bundle
-      - run: bundle exec rake db:create db:schema:load
       - run:
-          name: Run tests
-          command: bundle exec rake
+          name: Install CocoaPods
+          command: pod install --verbose
 
-  precompile_assets:
+      - run:
+          name: Build and run tests
+          command: fastlane scan
+          environment:
+            SCAN_DEVICE: iPhone 8
+            SCAN_SCHEME: WebTests
+
+      - store_test_results:
+          path: test_output/report.xml
+      - store_artifacts:
+          path: /tmp/test-results
+          destination: scan-test-results
+      - store_artifacts:
+          path: ~/Library/Logs/scan
+          destination: scan-logs
+
+  swiftlint:
     docker:
-      - image: circleci/ruby:2.4-node-jessie
-      - image: circleci/postgres:9.4.12-alpine
-    working_directory: ~/circleci-demo-workflows
+      - image: dantoml/swiftlint:latest
     steps:
-      - restore_cache:
-          key: v1-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          key: v1-bundle-{{ checksum "Gemfile.lock" }}
-      - run: bundle --path vendor/bundle
-      - run:
-          name: Precompile assets
-          command: bundle exec rake assets:precompile
-      - save_cache:
-          key: v1-assets-{{ .Environment.CIRCLE_SHA1 }}
-          paths:
-            - ~/circleci-demo-workflows/public/assets
+      - checkout
+      - run: swiftlint lint --reporter junit | tee result.xml
+      - store_artifacts:
+          path: result.xml
+      - store_test_results:
+          path: result.xml
 
-  deploy:
-    machine:
-        enabled: true
-    working_directory: ~/circleci-demo-workflows
-    environment:
-      HEROKU_APP: still-shelf-38337
+  danger:
+    docker:
+      - image: dantoml/danger:latest
     steps:
-      - restore_cache:
-          key: v1-repo-{{ .Environment.CIRCLE_SHA1 }}
-      - restore_cache:
-          key: v1-bundle-{{ checksum "Gemfile.lock" }}
-      - restore_cache:
-          key: v1-assets-{{ .Environment.CIRCLE_SHA1 }}
-      - run:
-          name: Deploy Master to Heroku
-          command: |
-            git push https://heroku:$HEROKU_API_KEY@git.heroku.com/$HEROKU_APP.git master
+      - checkout
+      - run: danger
 
 workflows:
-  version: 2
-  build-and-deploy:
+  build-test-lint:
     jobs:
-      - checkout_code
-      - bundle_dependencies:
-          requires:
-            - checkout_code
-      - rake_test:
-          requires:
-            - bundle_dependencies
-      - precompile_assets:
-          requires:
-            - bundle_dependencies
-      - deploy:
-          requires:
-            - rake_test
-            - precompile_assets
-
+      - swiftlint
+      - danger
+      - build-and-test
