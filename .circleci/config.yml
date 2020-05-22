@@ -31,7 +31,7 @@ jobs:
       - image: dantoml/swiftlint:latest
     steps:
       - checkout
-      - run: swiftlint lint --reporter junit | tee result.xml
+      - run: swiftlint lint --reporter junit 
       - store_artifacts:
           path: result.xml
       - store_test_results:
